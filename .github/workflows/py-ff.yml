@@ -31,6 +31,20 @@ jobs:
           grep 'TERMUX_APP__PACKAGE_NAME="com.sucu.dl"' scripts/properties.sh \
             || (echo "ERROR: El package name no es com.sucu.dl" && exit 1)
 
+      - name: Instalar componentes del Android SDK necesarios
+        run: |
+          # El SDK ya está en el runner pero faltan estas versiones específicas
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
+          
+          # Aceptar licencias automáticamente
+          yes | ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager \
+            --licenses 2>/dev/null || true
+          
+          # Instalar las versiones que termux-am necesita
+          ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-33" \
+            "build-tools;30.0.3"
+
       - name: Compilar paquetes dentro de Docker
         run: |
           # Convertir "python,ffmpeg" en dos llamadas separadas a build-package.sh
