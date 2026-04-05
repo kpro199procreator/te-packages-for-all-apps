@@ -1,0 +1,59 @@
+name: Build Packages for com.sucu.dl
+
+on:
+  # Solo se dispara manualmente desde la pestaña Actions
+  # Esto evita compilaciones accidentales que consuman minutos
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: 'Paquetes a compilar, separados por coma'
+        required: true
+        # python y ffmpeg + algunas dependencias comunes que necesitan
+        default: 'python,ffmpeg'
+      arch:
+        description: 'Arquitectura objetivo'
+        required: true
+        default: 'aarch64'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Los paquetes de Termux tardan mucho — necesitamos el límite máximo
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Verificar que el package name es correcto
+        run: |
+          # Solo una verificación de seguridad antes de compilar
+          grep 'TERMUX_APP__PACKAGE_NAME="com.sucu.dl"' scripts/properties.sh \
+            || (echo "ERROR: El package name no es com.sucu.dl" && exit 1)
+
+      - name: Compilar paquetes dentro de Docker
+        run: |
+          # Convertir "python,ffmpeg" en dos llamadas separadas a build-package.sh
+          IFS=',' read -ra PKGS <<< "${{ github.event.inputs.packages }}"
+          for pkg in "${PKGS[@]}"; do
+            echo "========================================"
+            echo "Compilando: $pkg para com.sucu.dl"
+            echo "========================================"
+            # -a: arquitectura
+            # -I: descargar dependencias del repo oficial en vez de compilarlas
+            #     (atajo necesario porque no tenemos aún nuestro propio repo completo)
+            ./scripts/run-docker.sh ./build-package.sh \
+              -a "${{ github.event.inputs.arch }}" \
+              -I \
+              "$pkg" \
+              2>&1  # mostrar todo el output en el log de Actions
+          done
+
+      - name: Guardar los .deb generados como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # El nombre incluye la arch para identificarlos fácilmente
+          name: debs-${{ github.event.inputs.arch }}
+          path: debs/
+          # Mantener los artifacts 30 días
+          retention-days: 30
