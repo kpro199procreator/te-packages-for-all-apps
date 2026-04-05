@@ -1,0 +1,91 @@
+name: Publish APT Repository
+
+on:
+  # Se puede disparar manualmente o automáticamente
+  # cuando Build Packages termina exitosamente
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Arquitectura de los paquetes a publicar'
+        required: true
+        default: 'aarch64'
+  workflow_run:
+    workflows: ["Build Packages for com.sucu.dl"]
+    types: [completed]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Estos permisos son necesarios para escribir en GitHub Pages
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    # Solo correr si el workflow anterior terminó exitosamente
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar herramientas para construir el repo apt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
+
+      - name: Descargar los .deb del workflow de compilación
+        uses: actions/download-artifact@v4
+        with:
+          name: debs-${{ github.event.inputs.arch || 'aarch64' }}
+          path: ./debs/
+          # Buscar el artifact en el workflow que disparó este
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Construir la estructura del repositorio apt
+        run: |
+          ARCH="${{ github.event.inputs.arch || 'aarch64' }}"
+          # Esta es la estructura que apt espera encontrar
+          REPO_DIR="./site/apt/termux-main"
+          mkdir -p "$REPO_DIR/dists/stable/main/binary-$ARCH"
+          mkdir -p "$REPO_DIR/pool/main"
+
+          # Copiar todos los .deb al pool (el almacén de paquetes)
+          cp debs/*.deb "$REPO_DIR/pool/main/" 2>/dev/null || true
+
+          # Generar el índice Packages que apt lee con `apt update`
+          cd "$REPO_DIR"
+          dpkg-scanpackages --multiversion pool/main \
+            > "dists/stable/main/binary-$ARCH/Packages"
+          # La versión comprimida (apt prefiere descargar esta)
+          gzip -k "dists/stable/main/binary-$ARCH/Packages"
+
+          # El archivo Release describe el repositorio
+          cat > dists/stable/Release <<EOF
+          Origin: te-packages-for-all-apps
+          Label: te-packages-for-all-apps
+          Suite: stable
+          Codename: stable
+          Architectures: $ARCH
+          Components: main
+          Description: Packages for com.sucu.dl
+          EOF
+
+          echo "Contenido del repo generado:"
+          find . -type f | sort
+
+      - name: Preparar para GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./site/
+
+      - name: Deploy a GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
