@@ -47,20 +47,20 @@ jobs:
 
       - name: Compilar paquetes dentro de Docker
         run: |
-          # Convertir "python,ffmpeg" en dos llamadas separadas a build-package.sh
           IFS=',' read -ra PKGS <<< "${{ github.event.inputs.packages }}"
           for pkg in "${PKGS[@]}"; do
             echo "========================================"
             echo "Compilando: $pkg para com.sucu.dl"
             echo "========================================"
-            # -a: arquitectura
-            # -I: descargar dependencias del repo oficial en vez de compilarlas
-            #     (atajo necesario porque no tenemos aún nuestro propio repo completo)
-            ./scripts/run-docker.sh ./build-package.sh \
-              -a "${{ github.event.inputs.arch }}" \
-              -I \
-              "$pkg" \
-              2>&1  # mostrar todo el output en el log de Actions
+            # TERMUX_PACKAGES_OFFLINE=true evita que el build system
+            # intente descargar o compilar dependencias Java/Android
+            # como termux-am que requieren un SDK preconfigurado
+            ./scripts/run-docker.sh \
+              bash -c "TERMUX_PACKAGES_OFFLINE=true ./build-package.sh \
+                -a ${{ github.event.inputs.arch }} \
+                -s \
+                '$pkg'" \
+              2>&1
           done
 
       - name: Guardar los .deb generados como artifact
