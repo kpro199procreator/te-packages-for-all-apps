@@ -1,0 +1,103 @@
+name: Publish APT Repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Run ID del workflow Build Packages (el número del run, ej: 24015151775)'
+        required: true
+      sha:
+        description: 'SHA del commit usado en ese run (ej: c04d7cfbf09e3b5da8cd666a136f41d9cc746487)'
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar herramientas apt
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y dpkg-dev apt-utils
+
+      - name: Descargar debs de las 4 arquitecturas
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.inputs.run_id }}
+          pattern: debs-*-${{ github.event.inputs.sha }}
+          path: ./downloaded/
+          merge-multiple: false
+
+      - name: Extraer los .tar y organizar por arquitectura
+        run: |
+          for arch in aarch64 arm i686 x86_64; do
+            TARFILE="./downloaded/debs-${arch}-${{ github.event.inputs.sha }}/debs-${arch}-${{ github.event.inputs.sha }}.tar"
+            if [ -f "$TARFILE" ]; then
+              echo "Extrayendo $arch..."
+              mkdir -p ./extracted/${arch}
+              tar xf "$TARFILE" -C ./extracted/${arch}/
+            else
+              echo "WARN: No se encontró $TARFILE"
+            fi
+          done
+
+      - name: Construir estructura del repositorio apt
+        run: |
+          for arch in aarch64 arm i686 x86_64; do
+            DEB_DIR="./extracted/${arch}/debs"
+            if [ ! -d "$DEB_DIR" ]; then
+              echo "No hay debs para $arch, saltando..."
+              continue
+            fi
+
+            POOL_DIR="./site/apt/termux-main/pool/main"
+            PKG_DIR="./site/apt/termux-main/dists/stable/main/binary-${arch}"
+            mkdir -p "$POOL_DIR" "$PKG_DIR"
+
+            # Copiar .deb al pool
+            find "$DEB_DIR" -name "*.deb" -exec cp {} "$POOL_DIR/" \;
+
+            # Generar índice Packages para esta arch
+            cd ./site/apt/termux-main
+            dpkg-scanpackages --multiversion pool/main \
+              | grep -v "^Filename: .*pool/main/.*" \
+              | sed "s|^Filename: pool/main/|Filename: pool/main/|" \
+              > "dists/stable/main/binary-${arch}/Packages"
+            gzip -k "dists/stable/main/binary-${arch}/Packages"
+            cd -
+          done
+
+          # Release file general
+          cat > ./site/apt/termux-main/dists/stable/Release <<EOF
+          Origin: te-packages-for-all-apps
+          Label: te-packages-for-all-apps
+          Suite: stable
+          Codename: stable
+          Architectures: aarch64 arm i686 x86_64
+          Components: main
+          Description: Packages for com.sucu.dl
+          EOF
+
+          echo "Estructura generada:"
+          find ./site -type f | sort
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./site/
+
+      - name: Deploy a GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
