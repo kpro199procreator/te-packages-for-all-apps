@@ -28,7 +28,12 @@ jobs:
       - name: Git clone
         uses: actions/checkout@v6
       - name: Create bootstrap archive
-        run: ./scripts/run-docker.sh ./scripts/generate-bootstraps.sh --architectures ${{ matrix.arch }}
+        run: |
+          docker run --rm \
+            --volume "${{ github.workspace }}:/home/builder/termux-packages" \
+            --workdir /home/builder/termux-packages \
+            ghcr.io/termux/package-builder:latest \
+            bash -c "./scripts/generate-bootstraps.sh --architectures ${{ matrix.arch }}"
       - name: Store artifacts
         uses: actions/upload-artifact@v6
         with:
