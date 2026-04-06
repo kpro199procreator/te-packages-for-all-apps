@@ -27,14 +27,20 @@ jobs:
             || (echo "ERROR: package name incorrecto" && exit 1)
           echo "✓ Package name correcto: com.sucu.dl"
 
-      - name: Instalar dependencias del sistema
+       - name: Instalar dependencias del sistema
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
             binutils curl libtool pkg-config \
             python3 python3-pip python3-requests \
             bison flex gawk gettext git \
-            tar unzip zip patchelf jq
+            tar unzip zip patchelf jq \
+            openjdk-17-jdk-headless
+
+          # Encontrar dónde está Java realmente instalado en este runner
+          JAVA_PATH=$(dirname $(dirname $(readlink -f $(which java))))
+          echo "Java encontrado en: $JAVA_PATH"
+          echo "JAVA_HOME=$JAVA_PATH" >> $GITHUB_ENV
 
       - name: Instalar Android SDK y NDK via setup-android-sdk.sh
         run: |
