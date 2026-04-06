@@ -1,14 +1,11 @@
 name: Build Packages for com.sucu.dl
 
 on:
-  # Solo se dispara manualmente desde la pestaña Actions
-  # Esto evita compilaciones accidentales que consuman minutos
   workflow_dispatch:
     inputs:
       packages:
         description: 'Paquetes a compilar, separados por coma'
         required: true
-        # python y ffmpeg + algunas dependencias comunes que necesitan
         default: 'python,ffmpeg'
       arch:
         description: 'Arquitectura objetivo'
@@ -18,56 +15,57 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Los paquetes de Termux tardan mucho — necesitamos el límite máximo
     timeout-minutes: 360
 
     steps:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
 
-      - name: Verificar que el package name es correcto
+      - name: Verificar package name
         run: |
-          # Solo una verificación de seguridad antes de compilar
           grep 'TERMUX_APP__PACKAGE_NAME="com.sucu.dl"' scripts/properties.sh \
-            || (echo "ERROR: El package name no es com.sucu.dl" && exit 1)
+            || (echo "ERROR: package name incorrecto" && exit 1)
+          echo "✓ Package name correcto: com.sucu.dl"
 
-      - name: Instalar componentes del Android SDK necesarios
+      - name: Instalar dependencias del sistema
         run: |
-          # El SDK ya está en el runner pero faltan estas versiones específicas
-          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}"
-          
-          # Aceptar licencias automáticamente
-          yes | ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager \
-            --licenses 2>/dev/null || true
-          
-          # Instalar las versiones que termux-am necesita
-          ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager \
-            "platforms;android-33" \
-            "build-tools;30.0.3"
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            binutils curl libtool pkg-config \
+            python3 python3-pip python3-requests \
+            bison flex gawk gettext git \
+            tar unzip zip patchelf jq
 
-      - name: Compilar paquetes dentro de Docker
+      - name: Instalar Android SDK y NDK via setup-android-sdk.sh
+        run: |
+          # Este es el script oficial de Termux para preparar el entorno
+          # Instala el NDK en la versión exacta que properties.sh espera
+          bash scripts/setup-android-sdk.sh
+        env:
+          # Forzar instalación no interactiva
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Compilar paquetes
         run: |
           IFS=',' read -ra PKGS <<< "${{ github.event.inputs.packages }}"
           for pkg in "${PKGS[@]}"; do
+            pkg=$(echo "$pkg" | xargs)  # trim espacios
             echo "========================================"
             echo "Compilando: $pkg para com.sucu.dl"
             echo "========================================"
-            # TERMUX_PACKAGES_OFFLINE=true evita que el build system
-            # intente descargar o compilar dependencias Java/Android
-            # como termux-am que requieren un SDK preconfigurado
-            ./scripts/run-docker.sh \
-              bash -c "TERMUX_PACKAGES_OFFLINE=true ./build-package.sh \
-                -a ${{ github.event.inputs.arch }} \
-                -s \
-                '$pkg'" \
+            # Sin run-docker.sh — directamente en el runner
+            # -f: forzar rebuild
+            # -a: arquitectura
+            bash build-package.sh \
+              -a "${{ github.event.inputs.arch }}" \
+              -f \
+              "$pkg" \
               2>&1
           done
 
-      - name: Guardar los .deb generados como artifact
+      - name: Guardar .deb como artifact
         uses: actions/upload-artifact@v4
         with:
-          # El nombre incluye la arch para identificarlos fácilmente
           name: debs-${{ github.event.inputs.arch }}
           path: debs/
-          # Mantener los artifacts 30 días
           retention-days: 30
