@@ -33,7 +33,9 @@ jobs:
             --volume "${{ github.workspace }}:/home/builder/termux-packages" \
             --workdir /home/builder/termux-packages \
             ghcr.io/termux/package-builder:latest \
-            bash -c "./scripts/generate-bootstraps.sh --architectures ${{ matrix.arch }}"
+            bash -c "./scripts/generate-bootstraps.sh \
+              --architectures ${{ matrix.arch }} \
+              --repository https://kpro199procreator.github.io/te-packages-for-all-apps/apt/termux-main"
       - name: Store artifacts
         uses: actions/upload-artifact@v6
         with:
