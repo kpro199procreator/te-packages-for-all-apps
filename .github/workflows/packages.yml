@@ -409,7 +409,7 @@ jobs:
           echo "[!] Please revbump package, rebase or tag commit with '%ci:no-build'"
           exit 1
         fi
-upload:
+  upload:
     concurrency: ${{ github.workflow }}
     permissions:
       contents: write
