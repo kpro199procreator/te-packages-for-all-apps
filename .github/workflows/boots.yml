@@ -1,0 +1,66 @@
+name: Generate Bootstrap ZIP
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Arquitectura (aarch64, arm, i686, x86_64)'
+        required: true
+        default: 'aarch64'
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verificar package name
+        run: |
+          grep 'TERMUX_APP__PACKAGE_NAME="com.sucu.dl"' scripts/properties.sh \
+            || (echo "ERROR: package name incorrecto" && exit 1)
+
+      - name: Apuntar al apt repo propio en properties.sh
+        run: |
+          # Buscar cómo se llaman las variables del repo en esta versión
+          echo "=== Variables de repo encontradas ==="
+          grep -n "REPO.*URL\|REPO.*BASE\|packages.*termux\|termux.*packages" \
+            scripts/properties.sh | grep -v "^#" | grep -v "REGEX" | head -20
+
+      - name: Generar bootstrap ZIP
+        run: |
+          ./scripts/run-docker.sh ./scripts/generate-bootstraps.sh \
+            --architectures "${{ github.event.inputs.arch }}" \
+            2>&1 | tee bootstrap.log
+
+      - name: Verificar que el ZIP fue generado
+        run: |
+          ls -lh bootstrap-*.zip
+          # Confirmar que usa com.sucu.dl y no com.termux
+          unzip -p bootstrap-${{ github.event.inputs.arch }}.zip \
+            usr/bin/bash 2>/dev/null \
+            | strings | grep "/data/data/" | head -3 || true
+
+      - name: Subir bootstrap como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-${{ github.event.inputs.arch }}
+          path: bootstrap-*.zip
+          retention-days: 90
+
+      - name: Crear GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: bootstrap-${{ github.run_number }}
+          name: "Bootstrap com.sucu.dl #${{ github.run_number }}"
+          body: |
+            Bootstrap ZIP para com.sucu.dl
+            Arquitectura: ${{ github.event.inputs.arch }}
+            Generado desde: ${{ github.sha }}
+          files: bootstrap-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
