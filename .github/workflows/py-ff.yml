@@ -28,7 +28,7 @@ jobs:
           echo "✓ Package name correcto: com.sucu.dl"
 
        - name: Instalar dependencias del sistema
-        run: |
+         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
             binutils curl libtool pkg-config \
