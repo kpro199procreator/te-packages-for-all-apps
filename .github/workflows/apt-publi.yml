@@ -67,14 +67,15 @@ jobs:
 
           # Release file general
           cat > ./site/apt/termux-main/dists/stable/Release <<EOF
-          Origin: te-packages-for-all-apps
-          Label: te-packages-for-all-apps
+          Origin: SucuDL-Repository
+          Label: SucuDL
           Suite: stable
           Codename: stable
-          Architectures: aarch64 arm i686 x86_64
+          Architectures: aarch64
           Components: main
-          Description: Packages for com.sucu.dl
+          Description: Repositorio oficial para com.sucu.dl
           EOF
+
 
           echo "Estructura generada:"
           find ./site -type f | sort
