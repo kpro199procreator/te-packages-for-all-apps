@@ -3,11 +3,8 @@ name: Publish APT Repository
 on:
   workflow_dispatch:
     inputs:
-      run_id:
-        description: 'Run ID del workflow Build Packages (el número del run, ej: 24015151775)'
-        required: true
-      sha:
-        description: 'SHA del commit usado en ese run (ej: c04d7cfbf09e3b5da8cd666a136f41d9cc746487)'
+      codespace_url:
+        description: 'URL pública del puerto 8080 de tu Codespace (ej: https://...app.github.dev)'
         required: true
 
 jobs:
@@ -29,43 +26,43 @@ jobs:
       - name: Instalar herramientas apt
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y dpkg-dev apt-utils
+          sudo apt-get install -y dpkg-dev apt-utils wget
 
-      - name: Descargar debs desde Codespaces
+      - name: Descargar debs desde el Codespace
         run: |
           mkdir -p ./extracted/aarch64/debs
-          # Sustituye con la URL pública de tu puerto 8080 de Codespaces
-          URL="https://tu-codespace-8080.app.github.dev"
-          wget -r -np -nd -A "*.deb" $URL/ -P ./extracted/aarch64/debs/
-
+          # Descarga recursiva de todos los .deb ignorando la estructura de carpetas del server
+          wget -r -np -nd -A "*.deb" "${{ github.event.inputs.codespace_url }}" -P ./extracted/aarch64/debs/
+          
+          echo "Archivos descargados:"
+          ls ./extracted/aarch64/debs/
 
       - name: Construir estructura del repositorio apt
         run: |
-          for arch in aarch64 arm i686 x86_64; do
-            DEB_DIR="./extracted/${arch}/debs"
-            if [ ! -d "$DEB_DIR" ]; then
-              echo "No hay debs para $arch, saltando..."
-              continue
-            fi
+          # Definir arquitectura principal
+          arch="aarch64"
+          DEB_DIR="./extracted/${arch}/debs"
+          
+          if [ ! -d "$DEB_DIR" ] || [ -z "$(ls -A $DEB_DIR)" ]; then
+            echo "Error: No se encontraron archivos .deb descargados."
+            exit 1
+          fi
 
-            POOL_DIR="./site/apt/termux-main/pool/main"
-            PKG_DIR="./site/apt/termux-main/dists/stable/main/binary-${arch}"
-            mkdir -p "$POOL_DIR" "$PKG_DIR"
+          POOL_DIR="./site/apt/termux-main/pool/main"
+          PKG_DIR="./site/apt/termux-main/dists/stable/main/binary-${arch}"
+          mkdir -p "$POOL_DIR" "$PKG_DIR"
 
-            # Copiar .deb al pool
-            find "$DEB_DIR" -name "*.deb" -exec cp {} "$POOL_DIR/" \;
+          # Copiar todos los .deb al pool
+          cp "$DEB_DIR"/*.deb "$POOL_DIR/"
 
-            # Generar índice Packages para esta arch
-            cd ./site/apt/termux-main
-            dpkg-scanpackages --multiversion pool/main \
-              | grep -v "^Filename: .*pool/main/.*" \
-              | sed "s|^Filename: pool/main/|Filename: pool/main/|" \
-              > "dists/stable/main/binary-${arch}/Packages"
-            gzip -k "dists/stable/main/binary-${arch}/Packages"
-            cd -
-          done
+          # Generar índice Packages
+          # Usamos cd para que las rutas en el archivo Packages sean relativas a la raíz del repo
+          cd ./site/apt/termux-main
+          dpkg-scanpackages --multiversion pool/main > "dists/stable/main/binary-${arch}/Packages"
+          gzip -9c "dists/stable/main/binary-${arch}/Packages" > "dists/stable/main/binary-${arch}/Packages.gz"
+          cd -
 
-          # Release file general
+          # Crear archivo Release
           cat > ./site/apt/termux-main/dists/stable/Release <<EOF
           Origin: SucuDL-Repository
           Label: SucuDL
@@ -73,12 +70,10 @@ jobs:
           Codename: stable
           Architectures: aarch64
           Components: main
-          Description: Repositorio oficial para com.sucu.dl
+          Description: Packages for com.sucu.dl
           EOF
 
-
-          echo "Estructura generada:"
-          find ./site -type f | sort
+          echo "Estructura del repositorio generada exitosamente."
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
