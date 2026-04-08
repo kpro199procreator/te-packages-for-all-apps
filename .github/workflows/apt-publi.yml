@@ -31,27 +31,13 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y dpkg-dev apt-utils
 
-      - name: Descargar debs de las 4 arquitecturas
-        uses: actions/download-artifact@v4
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.inputs.run_id }}
-          pattern: debs-*-${{ github.event.inputs.sha }}
-          path: ./downloaded/
-          merge-multiple: false
-
-      - name: Extraer los .tar y organizar por arquitectura
+      - name: Descargar debs desde Codespaces
         run: |
-          for arch in aarch64 arm i686 x86_64; do
-            TARFILE="./downloaded/debs-${arch}-${{ github.event.inputs.sha }}/debs-${arch}-${{ github.event.inputs.sha }}.tar"
-            if [ -f "$TARFILE" ]; then
-              echo "Extrayendo $arch..."
-              mkdir -p ./extracted/${arch}
-              tar xf "$TARFILE" -C ./extracted/${arch}/
-            else
-              echo "WARN: No se encontró $TARFILE"
-            fi
-          done
+          mkdir -p ./extracted/aarch64/debs
+          # Sustituye con la URL pública de tu puerto 8080 de Codespaces
+          URL="https://tu-codespace-8080.app.github.dev"
+          wget -r -np -nd -A "*.deb" $URL/ -P ./extracted/aarch64/debs/
+
 
       - name: Construir estructura del repositorio apt
         run: |
