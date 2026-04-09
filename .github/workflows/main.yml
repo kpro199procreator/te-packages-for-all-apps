@@ -62,7 +62,7 @@ jobs:
       run: |
         # Iniciar el sistema de build oficial de Termux usando Docker
         # Se pasa el comando build-package.sh al contenedor a través de run-docker.sh
-        ./run-docker.sh ./build-package.sh -a ${{ matrix.target_arch }} ${{ github.event.inputs.packages }}
+        ./scripts/run-docker.sh ./build-package.sh -a ${{ matrix.target_arch }} ${{ github.event.inputs.packages }}
 
     - name: Upload artifacts
       if: success()
