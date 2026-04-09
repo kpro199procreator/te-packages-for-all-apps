@@ -1,0 +1,143 @@
+name: Packages
+
+on:
+  push:
+    branches:
+    - master
+    - dev
+    - 'dev/**'
+    paths:
+    - 'packages/**'
+    - 'root-packages/**'
+    - 'x11-packages/**'
+  pull_request:
+    paths:
+    - 'packages/**'
+    - 'root-packages/**'
+    - 'x11-packages/**'
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: "Lista de paquetes a compilar (separados por espacios)"
+        required: true
+        default: ""
+      free-space:
+        description: "Liberar espacio en disco antes de compilar"
+        type: boolean
+        default: false
+
+permissions: {} # none
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target_arch: [aarch64, arm, i686, x86_64]
+      fail-fast: false
+    steps:
+    - name: Clone repository
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 1000
+
+    - name: Freeing up disk space
+      if: github.event.inputs.free-space == 'true'
+      run: |
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /usr/share/dotnet
+
+    - name: Build packages (Docker)
+      id: build
+      env:
+        TERMUX_APP_PACKAGE: com.sucu.dl
+        TERMUX_PREFIX: /data/data/com.termux/files/usr
+        TERMUX_ANDROID_HOME: /data/data/com.termux/files/home
+      run: |
+        # Iniciar el sistema de build oficial de Termux usando Docker
+        # Se pasa el comando build-package.sh al contenedor a través de run-docker.sh
+        ./run-docker.sh ./build-package.sh -a ${{ matrix.target_arch }} ${{ github.event.inputs.packages }}
+
+    - name: Upload artifacts
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: debs-${{ matrix.target_arch }}-${{ github.sha }}
+        path: ./output/*.deb
+
+  upload:
+    concurrency: 
+      group: github-pages-deploy
+      cancel-in-progress: true
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    if: github.repository == 'kpro199procreator/te-packages-for-all-apps' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v6
+
+    - name: Instalar herramientas de repositorio APT
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y dpkg-dev apt-utils
+
+    - name: Descargar todos los artefactos (.deb)
+      uses: actions/download-artifact@v4
+      with:
+        path: ./all-debs
+
+    - name: Generar estructura de repositorio GitHub Pages
+      run: |
+        REPO_ROOT="./public/apt/termux-main"
+        POOL_DIR="$REPO_ROOT/pool/main"
+        mkdir -p "$POOL_DIR"
+
+        # Organizar debs
+        find ./all-debs -name "*.deb" -exec cp {} "$POOL_DIR/" \;
+
+        # Generar índices por arquitectura
+        for arch in aarch64 arm i686 x86_64; do
+          BINARY_DIR="$REPO_ROOT/dists/stable/main/binary-${arch}"
+          mkdir -p "$BINARY_DIR"
+          
+          pushd "$REPO_ROOT" > /dev/null
+          dpkg-scanpackages --arch "$arch" pool/main > "dists/stable/main/binary-${arch}/Packages"
+          gzip -9c "dists/stable/main/binary-${arch}/Packages" > "dists/stable/main/binary-${arch}/Packages.gz"
+          popd > /dev/null
+        done
+
+        # Archivo Release
+        cat > "$REPO_ROOT/dists/stable/Release" <<EOF
+        Origin: SucuDL-Repository
+        Label: SucuDL
+        Suite: stable
+        Codename: stable
+        Architectures: aarch64 arm i686 x86_64
+        Components: main
+        Description: Packages for com.sucu.dl
+        EOF
+
+    - name: Configurar GitHub Pages
+      uses: actions/configure-pages@v5
+
+    - name: Subir artefacto de Pages
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: ./public
+
+    - name: Desplegar en GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
