@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       codespace_url:
-        description: 'URL pública del puerto 8080 de tu Codespace (ej: https://...app.github.dev)'
+        description: "URL pública del puerto 8080 de tu Codespace"
         required: true
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
       pages: write
@@ -23,63 +24,69 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Instalar herramientas apt
+      - name: Instalar herramientas
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y dpkg-dev apt-utils wget
 
-      - name: Descargar debs desde el Codespace
+      - name: Descargar paquetes .deb
         run: |
-          mkdir -p ./extracted/aarch64/debs
-          # Descarga recursiva de todos los .deb ignorando la estructura de carpetas del server
-          wget -r -np -nd -A "*.deb" "${{ github.event.inputs.codespace_url }}" -P ./extracted/aarch64/debs/
-          
-          echo "Archivos descargados:"
-          ls ./extracted/aarch64/debs/
+          mkdir -p extracted/aarch64/debs
+          wget -r -np -nd -A "*.deb" "${{ github.event.inputs.codespace_url }}" -P extracted/aarch64/debs/
 
-      - name: Construir estructura del repositorio apt
+          echo "Archivos descargados:"
+          ls extracted/aarch64/debs/ || true
+
+      - name: Construir repositorio APT
         run: |
-          # Definir arquitectura principal
-          arch="aarch64"
-          DEB_DIR="./extracted/${arch}/debs"
-          
+          set -e
+
+          ARCH="aarch64"
+          BASE="site/apt/termux-main"
+          POOL="$BASE/pool/main"
+          DIST="$BASE/dists/stable/main/binary-$ARCH"
+          DEB_DIR="extracted/$ARCH/debs"
+
           if [ ! -d "$DEB_DIR" ] || [ -z "$(ls -A $DEB_DIR)" ]; then
-            echo "Error: No se encontraron archivos .deb descargados."
+            echo "No hay paquetes .deb"
             exit 1
           fi
 
-          POOL_DIR="./site/apt/termux-main/pool/main"
-          PKG_DIR="./site/apt/termux-main/dists/stable/main/binary-${arch}"
-          mkdir -p "$POOL_DIR" "$PKG_DIR"
+          mkdir -p "$POOL" "$DIST"
 
-          # Copiar todos los .deb al pool
-          cp "$DEB_DIR"/*.deb "$POOL_DIR/"
+          # Copiar paquetes
+          cp "$DEB_DIR"/*.deb "$POOL/"
 
-          # Generar índice Packages
-          # Usamos cd para que las rutas en el archivo Packages sean relativas a la raíz del repo
-          cd ./site/apt/termux-main
-          dpkg-scanpackages --multiversion pool/main > "dists/stable/main/binary-${arch}/Packages"
-          gzip -9c "dists/stable/main/binary-${arch}/Packages" > "dists/stable/main/binary-${arch}/Packages.gz"
-          cd -
+          # Generar Packages
+          cd "$BASE"
+          dpkg-scanpackages --multiversion pool/main > "dists/stable/main/binary-$ARCH/Packages"
+          gzip -9c "dists/stable/main/binary-$ARCH/Packages" > "dists/stable/main/binary-$ARCH/Packages.gz"
 
-          # Crear archivo Release
-          cat > ./site/apt/termux-main/dists/stable/Release <<EOF
-          Origin: SucuDL-Repository
-          Label: SucuDL
-          Suite: stable
-          Codename: stable
-          Architectures: aarch64
-          Components: main
-          Description: Packages for com.sucu.dl
+          # Configuración Release
+          cat > apt.conf <<EOF
+          APT::FTPArchive::Release {
+          Origin "SucuDL-Repository";
+          Label "SucuDL";
+          Suite "stable";
+          Codename "stable";
+          Architectures "$ARCH";
+          Components "main";
+          Description "Packages for com.sucu.dl";
+           };
           EOF
 
-          echo "Estructura del repositorio generada exitosamente."
+          # Generar Release válido
+          apt-ftparchive -c apt.conf release dists/stable > dists/stable/Release
 
-      - name: Upload Pages artifact
+          cd -
+
+          echo "Repositorio generado correctamente"
+
+      - name: Subir a GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./site/
 
-      - name: Deploy a GitHub Pages
+      - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
